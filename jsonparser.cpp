@@ -51,7 +51,7 @@ static int json_parse_number(json_context* c, json_value* v) {
     }
     errno = 0;
     v->n = strtod(c->json, nullptr);
-    if (errno = ERANGE && (v->n == HUGE_VAL || v->n == -HUGE_VAL))
+    if (errno == ERANGE && (v->n == HUGE_VAL || v->n == -HUGE_VAL))
         return JSON_PARSE_NUMBER_TOO_BIG;
     v->type = JSON_NUMBER;
     c->json = p;
@@ -60,10 +60,11 @@ static int json_parse_number(json_context* c, json_value* v) {
 
 static int json_parse_value(json_context* c, json_value* v) {
     switch (*c->json) {
-    case't': return json_parse_literal(c, v, "true", JSON_TRUE);
-    case'f': return json_parse_literal(c, v, "false", JSON_FALSE);
-    case'n': return json_parse_literal(c, v, "null", JSON_NULL);
-    default: break;
+    case 't': return json_parse_literal(c, v, "true", JSON_TRUE);
+    case 'f': return json_parse_literal(c, v, "false", JSON_FALSE);
+    case 'n': return json_parse_literal(c, v, "null", JSON_NULL);
+    default:  return json_parse_number(c, v);
+    case'\0': return JSON_PARSE_EXPECT_VALUE;
     }
 }
 
