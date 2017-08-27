@@ -92,7 +92,7 @@ static int json_parse_number(json_context* c, json_value* v) {
 
 static const char* json_parse_hex4(const char* p, unsigned int* u) {
     *u = 0;
-    for (int i = 0; i < 4; i++) {
+    for (size_t i = 0; i < 4; i++) {
         char ch = *p++;
         *u <<= 4;
         if      (ch >= '0' && ch <= '9') *u |= ch - '0';
@@ -180,6 +180,50 @@ static int json_parse_string(json_context* c, json_value* v) {
     }
 }
 
+static int json_parse_value(json_context* c, json_value* v);
+
+static int json_parse_array(json_context* c, json_value* v) {
+    size_t size = 0;
+    int ret;
+    EXPECT(c, '[');
+    json_parse_whitespace(c);
+    if (*c->json == ']') {
+        c->json++;
+        v->type = JSON_ARRAY;
+        v->u.a.size = 0;
+        v->u.a.e = nullptr;
+        return JSON_PARSE_OK;
+    }
+    for (;;) {
+        json_value e;
+        json_init(&e);
+        if ((ret = json_parse_value(c, &e)) != JSON_PARSE_OK)
+            break;
+        memcpy(json_context_push(c, sizeof(json_value)), &e, sizeof(json_value));
+        size++;
+        json_parse_whitespace(c);
+        if (*c->json == ',') {
+            c->json++;
+            json_parse_whitespace(c);
+        }
+        else if (*c->json == ']') {
+            c->json++;
+            v->type = JSON_ARRAY;
+            v->u.a.size = size;
+            size *= sizeof(json_value);
+            memcpy(v->u.a.e = (json_value*)malloc(size), json_context_pop(c, size), size);
+            return JSON_PARSE_OK;
+        }
+        else {
+            ret = JSON_PARSE_MISS_COMMA_OR_SQUARE_BRACKET;
+            break;
+        }
+    }
+    for (size_t i = 0; i < size; i++)
+        json_free((json_value*)json_context_pop(c, sizeof(json_value)));
+    return ret;
+}
+
 static int json_parse_value(json_context* c, json_value* v) {
     switch (*c->json) {
         case 't': return json_parse_literal(c, v, "true", JSON_TRUE);
@@ -187,6 +231,7 @@ static int json_parse_value(json_context* c, json_value* v) {
         case 'n': return json_parse_literal(c, v, "null", JSON_NULL);
         default:  return json_parse_number(c, v);
         case '"': return json_parse_string(c, v);
+        case '[': return json_parse_array(c, v);
         case'\0': return JSON_PARSE_EXPECT_VALUE;
     }
 }
@@ -214,8 +259,18 @@ int json_parse(json_value* v, const char* json) {
 
 void json_free(json_value* v) {
     assert(v != nullptr);
-    if (v->type == JSON_STRING)
-        free(v->u.s.s);
+    switch (v->type) {
+        case JSON_STRING:
+            free(v->u.s.s);
+            break;
+        case JSON_ARRAY:
+            for (size_t i = 0; i < v->u.a.size; i++)
+                json_free(&v->u.a.e[i]);
+            free(v->u.a.e);
+            break;
+        default:
+            break;
+    }
     v->type = JSON_NULL;
 }
 
@@ -263,4 +318,15 @@ void json_set_string(json_value* v, const char* s, size_t len) {
     v->u.s.s[len] = '\0';
     v->u.s.len = len;
     v->type = JSON_STRING;
+}
+
+size_t json_get_array_size(const json_value* v) {
+    assert(v != nullptr && v->type == JSON_ARRAY);
+    return v->u.a.size;
+}
+
+json_value* json_get_array_element(const json_value* v, size_t index) {
+    assert(v != nullptr && v->type == JSON_ARRAY);
+    assert(index < v->u.a.size);
+    return &v->u.a.e[index];
 }
