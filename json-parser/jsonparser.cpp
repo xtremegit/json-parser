@@ -126,8 +126,8 @@ static void json_encode_utf8(json_context* c, unsigned int u) {
 
 #define STRING_ERROR(ret) do { c->top = head; return ret; } while(0)
 
-static int json_parse_string(json_context* c, json_value* v) {
-    size_t head = c->top, len;
+static int json_parse_string_raw(json_context* c, char** str, size_t* len) {
+    size_t head = c->top;
     unsigned int u, u2;
     const char* p;
     EXPECT(c, '\"');
@@ -135,49 +135,58 @@ static int json_parse_string(json_context* c, json_value* v) {
     for (;;) {
         char ch = *p++;
         switch (ch) {
-            case '\"':
-                len = c->top - head;
-                json_set_string(v, (const char*)json_context_pop(c, len), len);
-                c->json = p;
-                return JSON_PARSE_OK;
-            case '\\':
-                switch (*p++) {
-                    case '\"': PUTC(c, '\"'); break;
-                    case '\\': PUTC(c, '\\'); break;
-                    case '/':  PUTC(c, '/');  break;
-                    case 'b':  PUTC(c, '\b'); break;
-                    case 'f':  PUTC(c, '\f'); break;
-                    case 'n':  PUTC(c, '\n'); break;
-                    case 'r':  PUTC(c, '\r'); break;
-                    case 't':  PUTC(c, '\t'); break;
-                    case 'u':
-                        if (!(p = json_parse_hex4(p, &u)))
-                            STRING_ERROR(JSON_PARSE_INVALID_UNICODE_HEX);
-                        if (u >= 0xD800 && u <= 0xDBFF) {  // surrogate handling
-                            if (*p++ != '\\')
-                                STRING_ERROR(JSON_PARSE_INVALID_UNICODE_SURROGATE);
-                            if (*p++ != 'u')
-                                STRING_ERROR(JSON_PARSE_INVALID_UNICODE_SURROGATE);
-                            if (!(p = json_parse_hex4(p, &u2)))
-                                STRING_ERROR(JSON_PARSE_INVALID_UNICODE_HEX);
-                            if (u2 < 0xDC00 || u2 > 0xDFFF)
-                                STRING_ERROR(JSON_PARSE_INVALID_UNICODE_SURROGATE);
-                            u = (((u - 0XD800) << 10) | (u2 - 0xDC00)) + 0x10000;
-                        }
-                        json_encode_utf8(c, u);
-                        break;
-                    default:
-                        STRING_ERROR(JSON_PARSE_INVALID_STRING_ESCAPE);
+        case '\"':
+            *len = c->top - head;
+            *str = (char*)json_context_pop(c, *len);
+            c->json = p;
+            return JSON_PARSE_OK;
+        case '\\':
+            switch (*p++) {
+            case '\"': PUTC(c, '\"'); break;
+            case '\\': PUTC(c, '\\'); break;
+            case '/':  PUTC(c, '/');  break;
+            case 'b':  PUTC(c, '\b'); break;
+            case 'f':  PUTC(c, '\f'); break;
+            case 'n':  PUTC(c, '\n'); break;
+            case 'r':  PUTC(c, '\r'); break;
+            case 't':  PUTC(c, '\t'); break;
+            case 'u':
+                if (!(p = json_parse_hex4(p, &u)))
+                    STRING_ERROR(JSON_PARSE_INVALID_UNICODE_HEX);
+                if (u >= 0xD800 && u <= 0xDBFF) {  // surrogate handling
+                    if (*p++ != '\\')
+                        STRING_ERROR(JSON_PARSE_INVALID_UNICODE_SURROGATE);
+                    if (*p++ != 'u')
+                        STRING_ERROR(JSON_PARSE_INVALID_UNICODE_SURROGATE);
+                    if (!(p = json_parse_hex4(p, &u2)))
+                        STRING_ERROR(JSON_PARSE_INVALID_UNICODE_HEX);
+                    if (u2 < 0xDC00 || u2 > 0xDFFF)
+                        STRING_ERROR(JSON_PARSE_INVALID_UNICODE_SURROGATE);
+                    u = (((u - 0XD800) << 10) | (u2 - 0xDC00)) + 0x10000;
                 }
+                json_encode_utf8(c, u);
                 break;
-            case '\0':
-                STRING_ERROR(JSON_PARSE_MISS_QUOTATION_MARK);
             default:
-                if ((unsigned char)ch < 0x20)
-                    STRING_ERROR(JSON_PARSE_INVALID_STRING_CHAR);
-                PUTC(c, ch);
+                STRING_ERROR(JSON_PARSE_INVALID_STRING_ESCAPE);
+            }
+            break;
+        case '\0':
+            STRING_ERROR(JSON_PARSE_MISS_QUOTATION_MARK);
+        default:
+            if ((unsigned char)ch < 0x20)
+                STRING_ERROR(JSON_PARSE_INVALID_STRING_CHAR);
+            PUTC(c, ch);
         }
     }
+}
+
+static int json_parse_string(json_context* c, json_value* v) {
+    int ret;
+    char* s;
+    size_t len;
+    if ((ret = json_parse_string_raw(c, &s, &len)) == JSON_PARSE_OK)
+        json_set_string(v, s, len);
+    return ret;
 }
 
 static int json_parse_value(json_context* c, json_value* v);
@@ -224,6 +233,73 @@ static int json_parse_array(json_context* c, json_value* v) {
     return ret;
 }
 
+static int json_parse_object(json_context* c, json_value* v) {
+    size_t size;
+    json_member m;
+    int ret;
+    EXPECT(c, '{');
+    json_parse_whitespace(c);
+    if (*c->json == '}') {
+        c->json++;
+        v->type = JSON_OBJECT;
+        v->u.o.m = 0;
+        v->u.o.size = 0;
+        return JSON_PARSE_OK;
+    }
+    m.k = nullptr;
+    size = 0;
+    for (;;) {
+        char* str;
+        json_init(&m.v);
+        if (*c->json != '"') {
+            ret = JSON_PARSE_MISS_KEY;
+            break;
+        }
+        if ((ret = json_parse_string_raw(c, &str, &m.klen)) != JSON_PARSE_OK)
+            break;
+        memcpy(m.k = (char*)malloc(m.klen + 1), str, m.klen);
+        m.k[m.klen] = '\0';
+        json_parse_whitespace(c);
+        if (*c->json != ':') {
+            ret = JSON_PARSE_MISS_COLON;
+            break;
+        }
+        c->json++;
+        json_parse_whitespace(c);
+        // parse value
+        if ((ret = json_parse_value(c, &m.v)) != JSON_PARSE_OK)
+            break;
+        memcpy(json_context_push(c, sizeof(json_member)), &m, sizeof(json_member));
+        size++;
+        m.k = nullptr; // ownership is transferred to member on stack
+        json_parse_whitespace(c);
+        if (*c->json == ',') {
+            c->json++;
+            json_parse_whitespace(c);
+        }
+        else if (*c->json == '}') {
+            size_t s = sizeof(json_member) * size;
+            c->json++;
+            v->type = JSON_OBJECT;
+            v->u.o.size = size;
+            memcpy(v->u.o.m = (json_member*)malloc(s), json_context_pop(c, s), s);
+            return JSON_PARSE_OK;
+        }
+        else {
+            ret = JSON_PARSE_MISS_COMMA_OR_CURLY_BRACKET;
+            break;
+        }
+    }
+    free(m.k);           // free(nullptr) is legal
+    for (size_t i = 0; i < size; i++) {
+        json_member* m = (json_member*)json_context_pop(c, sizeof(json_member));
+        free(m->k);
+        json_free(&m->v);
+    }
+    v->type = JSON_NULL;
+    return ret;
+}
+
 static int json_parse_value(json_context* c, json_value* v) {
     switch (*c->json) {
         case 't': return json_parse_literal(c, v, "true", JSON_TRUE);
@@ -232,6 +308,7 @@ static int json_parse_value(json_context* c, json_value* v) {
         default:  return json_parse_number(c, v);
         case '"': return json_parse_string(c, v);
         case '[': return json_parse_array(c, v);
+        case '{': return json_parse_object(c, v);
         case'\0': return JSON_PARSE_EXPECT_VALUE;
     }
 }
@@ -267,6 +344,13 @@ void json_free(json_value* v) {
             for (size_t i = 0; i < v->u.a.size; i++)
                 json_free(&v->u.a.e[i]);
             free(v->u.a.e);
+            break;
+        case JSON_OBJECT:
+            for (size_t i = 0; i < v->u.o.size; i++) {
+                free(v->u.o.m[i].k);
+                json_free(&v->u.o.m[i].v);
+            }
+            free(v->u.o.m);
             break;
         default:
             break;
@@ -329,4 +413,27 @@ json_value* json_get_array_element(const json_value* v, size_t index) {
     assert(v != nullptr && v->type == JSON_ARRAY);
     assert(index < v->u.a.size);
     return &v->u.a.e[index];
+}
+
+size_t json_get_object_size(const json_value* v) {
+    assert(v != nullptr && v->type == JSON_OBJECT);
+    return v->u.o.size;
+}
+
+const char* json_get_object_key(const json_value* v, size_t index) {
+    assert(v != nullptr && v->type == JSON_OBJECT);
+    assert(index < v->u.o.size);
+    return v->u.o.m[index].k;
+}
+
+size_t json_get_object_key_length(const json_value* v, size_t index) {
+    assert(v != nullptr && v->type == JSON_OBJECT);
+    assert(index < v->u.o.size);
+    return v->u.o.m[index].klen;
+}
+
+json_value* json_get_object_value(const json_value* v, size_t index) {
+    assert(v != nullptr && v->type == JSON_OBJECT);
+    assert(index < v->u.o.size);
+    return &v->u.o.m[index].v;
 }
