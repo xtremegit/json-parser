@@ -360,6 +360,54 @@ static void test_parse() {
     test_parse_miss_comma_or_curly_bracket();
 }
 
+#define TEST_ROUNDTRIP(json)\
+    do {\
+        json_value v;\
+        char* json2;\
+        size_t length;\
+        json_init(&v);\
+        EXPECT_EQ_INT(JSON_PARSE_OK, json_parse(&v, json));\
+        json2 = json_stringify(&v, &length);\
+        EXPECT_EQ_STRING(json, json2, length);\
+        json_free(&v);\
+        free(json2);\
+    } while(0)
+
+static void test_stringify_number() {
+    TEST_ROUNDTRIP("0");
+    TEST_ROUNDTRIP("-0");
+    TEST_ROUNDTRIP("1");
+    TEST_ROUNDTRIP("-1");
+    TEST_ROUNDTRIP("1.5");
+    TEST_ROUNDTRIP("-1.5");
+    TEST_ROUNDTRIP("2.25");
+    TEST_ROUNDTRIP("1e+20");
+    TEST_ROUNDTRIP("1.234e+20");
+    TEST_ROUNDTRIP("1.234e-20");
+    TEST_ROUNDTRIP("1.0000000000000002");  // the smallest number > 1
+    TEST_ROUNDTRIP("4.9406564584124654e-324");  // maximum denormal
+    TEST_ROUNDTRIP("-4.9406564584124654e-324");
+    TEST_ROUNDTRIP("2.2250738585072009e-308");  // max subnormal double
+    TEST_ROUNDTRIP("-2.2250738585072009e-308");
+    TEST_ROUNDTRIP("2.2250738585072014e-308");  // min normal positive double
+    TEST_ROUNDTRIP("-2.2250738585072014e-308");
+    TEST_ROUNDTRIP("1.7976931348623157e+308");  // max double
+    TEST_ROUNDTRIP("-1.7976931348623157e+308");
+}
+
+static void test_stringify_string() {
+    TEST_ROUNDTRIP("\"\"");
+    TEST_ROUNDTRIP("\"Hello\"");
+    TEST_ROUNDTRIP("\"Hello\\nWorld\"");
+    TEST_ROUNDTRIP("\"\\\" \\\\ / \\b \\f \\n \\r \\t\"");
+    TEST_ROUNDTRIP("\"Hello\\u0000World\"");
+}
+
+static void test_stringify_array() {
+    TEST_ROUNDTRIP("[]");
+    TEST_ROUNDTRIP("[null,false,true,123,\"abc\",[1,2,3]]");
+}
+
 static void test_access_null() {
     json_value v;
     json_init(&v);
@@ -367,6 +415,21 @@ static void test_access_null() {
     json_set_null(&v);
     EXPECT_EQ_INT(JSON_NULL, json_get_type(&v));
     json_free(&v);
+}
+
+static void test_stringify_object() {
+    TEST_ROUNDTRIP("{}");
+    TEST_ROUNDTRIP("{\"n\":null,\"f\":false,\"t\":true,\"i\":123,\"s\":\"abc\",\"a\":[1,2,3],\"o\":{\"1\":1,\"2\":2,\"3\":3}}");
+}
+
+static void test_stringify() {
+    TEST_ROUNDTRIP("null");
+    TEST_ROUNDTRIP("false");
+    TEST_ROUNDTRIP("true");
+    test_stringify_number();
+    test_stringify_string();
+    test_stringify_array();
+    test_stringify_object();
 }
 
 static void test_access_boolean() {
@@ -412,6 +475,7 @@ int main() {
 #endif 
 
     test_parse();
+    test_stringify();
     test_access();
     printf("%d/%d (%3.2f%%) passed\n", test_pass, test_count, test_pass * 100.0 / test_count);
     return main_ret;

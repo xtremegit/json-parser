@@ -6,6 +6,7 @@
 #include <assert.h> // assert()
 #include <errno.h>  // errno, ERANGE
 #include <math.h>   // HUGE_VAL
+#include <stdio.h>  // sprintf()
 #include <stdlib.h> // mallloc(), realloc(), free(), strtod()
 #include <string.h> // memcpy()
 
@@ -13,10 +14,16 @@
 #define JSON_PARSE_STACK_INIT_SIZE 256
 #endif
 
+#ifndef JSON_PARSE_STRINGIFY_INIT_SIZE
+#define JSON_PARSE_STRINGIFY_INIT_SIZE 256
+#endif
+
+
 #define EXPECT(c, ch)      do { assert(*c->json == (ch)); c->json++; } while(0)
 #define ISDIGIT(ch)        ((ch) >= '0' && (ch) <= '9')
 #define ISDIGIT1TO9(ch)    ((ch) >= '1' && (ch) <= '9')
 #define PUTC(c, ch)        do { *(char*)json_context_push(c, sizeof(char)) = (ch); } while(0)
+#define PUTS(c, s, len)    memcpy(json_context_push(c, len), s, len)
 
 typedef struct {
     const char* json;
@@ -332,6 +339,18 @@ int json_parse(json_value* v, const char* json) {
     assert(c.top == 0);
     free(c.stack);
     return ret;
+}
+
+static void json_stringify_string(json_context* c, const char* s, size_t len) {
+    // TODO
+}
+
+static void json_stringify_value(json_context* c, const json_value* v) {
+    // TODO
+}
+
+char* json_stringify(const json_value* v, size_t length) {
+    // TODO
 }
 
 void json_free(json_value* v) {
