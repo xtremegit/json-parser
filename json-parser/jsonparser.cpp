@@ -346,11 +346,46 @@ static void json_stringify_string(json_context* c, const char* s, size_t len) {
 }
 
 static void json_stringify_value(json_context* c, const json_value* v) {
-    // TODO
+    switch (v->type) {
+        case JSON_NULL:   PUTS(c, "null", 4);  break;
+        case JSON_FALSE:  PUTS(c, "false", 5); break;
+        case JSON_TRUE:   PUTS(c, "true", 4);  break;
+        case JSON_NUMBER: c->top -= 32 - sprintf((char*)json_context_push(c, 32), "%.17g", v->u.n); break;
+        case JSON_STRING: json_stringify_string(c, v->u.s.s, v->u.s.len); break;
+        case JSON_ARRAY:  
+            PUTC(c, '[');
+            for (size_t i = 0; i < v->u.a.size; i++) {
+                if (i > 0)
+                    PUTC(c, ',');
+                json_stringify_value(c, &v->u.a.e[i]);
+            }
+            PUTC(c, ']');
+            break;
+        case JSON_OBJECT: 
+            PUTC(c, '{');
+            for (size_t i = 0; i < v->u.o.size; i++) {
+                if (i > 0)
+                    PUTC(c, ',');
+                json_stringify_string(c, v->u.o.m[i].k, v->u.o.m[i].klen);
+                PUTC(c, ':');
+                json_stringify_value(c, &v->u.o.m[i].v);
+            }
+            PUTC(c, '}');
+            break;
+        default: assert(0 && "invalid type");
+    }
 }
 
-char* json_stringify(const json_value* v, size_t length) {
-    // TODO
+char* json_stringify(const json_value* v, size_t* length) {
+    json_context c;
+    assert(v != nullptr);
+    c.stack = (char*)malloc(c.size = JSON_PARSE_STRINGIFY_INIT_SIZE);
+    c.top = 0;
+    json_stringify_value(&c, v);
+    if (length)
+        *length = c.top;
+    PUTC(&c, '\0');
+    return c.stack;
 }
 
 void json_free(json_value* v) {
